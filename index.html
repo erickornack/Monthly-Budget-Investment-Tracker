@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Eric's Monthly Budget Tracker</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+
+
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+// car figures are monthly totals (biweekly payment × 2) — this tracker sums
+// fixed expenses directly without doubling, so the biweekly amount can't go here as-is
+const OLD_CAR = { car: 501.28, insurance: 175.62 }; // $250.64 biweekly × 2
+const NEW_CAR = { car: 728.34, insurance: 263.37 }; // $364.17 biweekly × 2
+const NEW_CAR_MONTH_INDEX = 8; // September, 0-indexed
+
+const FIXED_EXPENSES = [
+  { id: "rent", label: "Rent", amount: 950, category: "housing" },
+  { id: "car", label: "Car Payment", amount: OLD_CAR.car, category: "transport" },
+  { id: "insurance", label: "Auto Insurance", amount: OLD_CAR.insurance, category: "transport" },
+  { id: "phoneinternet", label: "Phone & Internet (Bell, net)", amount: 91.77, category: "utilities" },
+  { id: "utilities", label: "Utilities", amount: 70.00, category: "utilities" },
+  { id: "gym", label: "Fit 4 Less", amount: 31.62, category: "lifestyle" },
+  { id: "amazon", label: "Amazon Prime", amount: 11.29, category: "lifestyle" },
+  { id: "spotify", label: "Spotify Premium", amount: 15.81, category: "lifestyle" },
+  { id: "playstation", label: "PlayStation", amount: 16.94, category: "lifestyle" },
+  { id: "gemini", label: "Gemini", amount: 30.50, category: "lifestyle" },
+  { id: "claude", label: "Claude", amount: 31.64, category: "lifestyle" },
+];
+
+const INCOME_BASE = 4855.54;
+const START_MONTH = 6; // July
+const CURRENT_YEAR = 2026;
+
+const DEFAULT_VARIABLE_ROWS = Array.from({ length: 8 }, (_, i) => ({ id: `row_${i}`, label: "", amount: "" }));
+
+const PREFILLED_MONTHS = {
+  "2026-8": { // September
+    rows: DEFAULT_VARIABLE_ROWS.map(r => ({ ...r })),
+    mileage: "", expenses_payout: "", investment: "1614.26",
+    notes: "Full savings push begins — conservative $750 floor retired, every spare dollar routes to the TFSA. Real car numbers now locked in.",
+  },
+  "2026-9": { // October
+    rows: DEFAULT_VARIABLE_ROWS.map(r => ({ ...r })),
+    mileage: "", expenses_payout: "2427.77", investment: "1614.26",
+    notes: "3-paycheque month — bonus paycheque confirmed, extra cushion on top of the regular push.",
+  },
+  "2026-10": { // November
+    rows: DEFAULT_VARIABLE_ROWS.map(r => ({ ...r })),
+    mileage: "", expenses_payout: "", investment: "1614.26",
+    notes: "Aggressive push continues — no floor, full surplus to TFSA.",
+  },
+};
+
+function fmt(n) {
+  return `$${Number(n || 0).toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+const C = {
+  bg: "#1a1a0e",
+  paper: "#f5f0e8",
+  paperDark: "#e8e0cc",
+  green: "#2d4a2d",
+  greenLight: "#3d6b3d",
+  greenMid: "#4a7c4a",
+  greenPale: "#c8dfc8",
+  cream: "#f5f0e8",
+  creamDark: "#d4c9a8",
+  ink: "#1a1a0e",
+  inkLight: "#3d3820",
+  inkFade: "#7a6e52",
+  red: "#8b2020",
+  gold: "#b8922a",
+};
+
+const SPLIT = [
+  { label: "XEQT", pct: 0.70, desc: "Global equities — your foundation", color: C.greenLight },
+  { label: "VFV", pct: 0.20, desc: "S&P 500 — US large cap tilt", color: C.gold },
+  { label: "XQQ", pct: 0.10, desc: "Nasdaq 100 — growth kicker", color: C.inkLight },
+];
+
+function RusticTracker() {
+  const [selectedMonth, setSelectedMonth] = useState(8); // start on September
+  const [selectedYear] = useState(2026);
+  const [monthData, setMonthData] = useState(() => ({ ...PREFILLED_MONTHS }));
+  const [activeTab, setActiveTab] = useState("overview");
+  const [editingFixed, setEditingFixed] = useState(false);
+  const [fixedExpenses, setFixedExpenses] = useState(() =>
+    FIXED_EXPENSES.map(f =>
+      f.id === "car" && 8 >= NEW_CAR_MONTH_INDEX
+        ? { ...f, amount: NEW_CAR.car }
+        : f.id === "insurance" && 8 >= NEW_CAR_MONTH_INDEX
+        ? { ...f, amount: NEW_CAR.insurance }
+        : f
+    )
+  );
+  const [newLabel, setNewLabel] = useState("");
+  const [newAmount, setNewAmount] = useState("");
+  const [calcAmount, setCalcAmount] = useState("1614.26");
+
+  // Auto-switch car payment & insurance when crossing the September boundary
+  useEffect(() => {
+    const useNewCar = selectedYear === CURRENT_YEAR && selectedMonth >= NEW_CAR_MONTH_INDEX;
+    setFixedExpenses(prev =>
+      prev.map(f => {
+        if (f.id === "car") return { ...f, amount: useNewCar ? NEW_CAR.car : OLD_CAR.car };
+        if (f.id === "insurance") return { ...f, amount: useNewCar ? NEW_CAR.insurance : OLD_CAR.insurance };
+        return f;
+      })
+    );
+  }, [selectedMonth, selectedYear]);
+
+  const monthKey = `${selectedYear}-${selectedMonth}`;
+
+  const getMonthData = () => monthData[monthKey] || {
+    rows: DEFAULT_VARIABLE_ROWS.map(r => ({ ...r })),
+    mileage: "",
+    expenses_payout: "",
+    investment: "",
+    notes: "",
+  };
+
+  const updateMonthData = (updates) => {
+    setMonthData(prev => ({ ...prev, [monthKey]: { ...getMonthData(), ...updates } }));
+  };
+
+  const updateRow = (rowId, field, value) => {
+    const current = getMonthData();
+    updateMonthData({
+      rows: current.rows.map(r => r.id === rowId ? { ...r, [field]: value } : r),
+    });
+  };
+
+  const addRow = () => {
+    const current = getMonthData();
+    updateMonthData({ rows: [...current.rows, { id: `row_${Date.now()}`, label: "", amount: "" }] });
+  };
+
+  const removeRow = (rowId) => {
+    const current = getMonthData();
+    updateMonthData({ rows: current.rows.filter(r => r.id !== rowId) });
+  };
+
+  const data = getMonthData();
+  const fixedTotal = fixedExpenses.reduce((a, e) => a + e.amount, 0);
+  const variableTotal = data.rows.reduce((a, r) => a + (parseFloat(r.amount) || 0), 0);
+  const mileage = parseFloat(data.mileage) || 0;
+  const expensesPayout = parseFloat(data.expenses_payout) || 0;
+  const totalIncome = INCOME_BASE + mileage + expensesPayout;
+  const totalExpenses = fixedTotal + variableTotal;
+  const invested = parseFloat(data.investment) || 0;
+  const remaining = totalIncome - totalExpenses - invested;
+  const isLocked = selectedYear === CURRENT_YEAR && selectedMonth < START_MONTH;
+  const isNewCarMonth = selectedYear === CURRENT_YEAR && selectedMonth >= NEW_CAR_MONTH_INDEX;
+
+  const investmentMode = invested >= 2000 ? "aggressive" : invested >= 750 ? "conservative" : invested > 0 ? "minimal" : "none";
+  const modeConfig = {
+    aggressive: { label: "Aggressive Month", color: C.greenLight },
+    conservative: { label: "Conservative Month", color: C.gold },
+    minimal: { label: "Minimal Investment", color: C.inkFade },
+    none: { label: "No Investment Logged", color: C.red },
+  };
+
+  const inputStyle = {
+    background: "transparent",
+    border: "none",
+    borderBottom: `1px solid ${C.creamDark}`,
+    outline: "none",
+    color: C.ink,
+    fontSize: "13px",
+    fontFamily: "'Georgia', serif",
+    padding: "4px 2px",
+    width: "100%",
+  };
+
+  const tabStyle = (tab) => ({
+    flex: 1,
+    padding: "10px 4px",
+    background: activeTab === tab ? C.green : "transparent",
+    border: "none",
+    borderBottom: activeTab === tab ? `3px solid ${C.gold}` : `3px solid transparent`,
+    color: activeTab === tab ? C.cream : C.inkFade,
+    fontSize: "9px",
+    letterSpacing: "1.5px",
+    textTransform: "uppercase",
+    cursor: "pointer",
+    fontFamily: "'Georgia', serif",
+    transition: "all 0.2s",
+  });
+
+  const calcAmt = parseFloat(calcAmount) || 0;
+
+  return (
+    <div style={{ minHeight: "100vh", background: C.bg, fontFamily: "'Georgia', serif" }}>
+
+      {/* Header */}
+      <div style={{
+        background: `linear-gradient(180deg, ${C.green} 0%, #1e3a1e 100%)`,
+        padding: "28px 20px 0",
+        borderBottom: `3px solid ${C.gold}`,
+        position: "relative",
+        overflow: "hidden",
+      }}>
+        <div style={{
+          position: "absolute", inset: 0, opacity: 0.04,
+          backgroundImage: "repeating-linear-gradient(45deg, #fff 0, #fff 1px, transparent 0, transparent 50%)",
+          backgroundSize: "8px 8px",
+          pointerEvents: "none",
+        }} />
+
+        <div style={{ position: "relative" }}>
+          <div style={{ fontSize: "9px", letterSpacing: "5px", color: C.gold, textTransform: "uppercase", marginBottom: "4px" }}>
+            ✦ Personal Ledger ✦
+          </div>
+          <h1 style={{ margin: "0 0 4px", fontSize: "26px", fontWeight: "normal", color: C.cream, letterSpacing: "1px" }}>
+            Monthly Tracker
+          </h1>
+          <p style={{ margin: "0 0 20px", color: C.greenPale, fontSize: "12px", fontStyle: "italic" }}>
+            Expenses & Investment Log — {selectedYear}
+          </p>
+
+          {/* Month tabs */}
+          <div style={{ display: "flex", gap: "2px", overflowX: "auto", marginBottom: "-3px" }}>
+            {MONTHS.map((m, i) => {
+              const locked = selectedYear === CURRENT_YEAR && i < START_MONTH;
+              const isActive = i === selectedMonth;
+              const hasData = monthData[`${selectedYear}-${i}`]?.investment;
+              const isTransitionMonth = i === NEW_CAR_MONTH_INDEX;
+              return (
+                <button
+                  key={i}
+                  onClick={() => !locked && setSelectedMonth(i)}
+                  style={{
+                    padding: "8px 10px",
+                    background: isActive ? C.cream : "transparent",
+                    border: "none",
+                    borderBottom: isActive ? `3px solid ${C.gold}` : "3px solid transparent",
+                    color: locked ? "#2a3a2a" : isActive ? C.ink : hasData ? C.gold : C.greenPale,
+                    cursor: locked ? "default" : "pointer",
+                    fontSize: "9px",
+                    letterSpacing: "1px",
+                    textTransform: "uppercase",
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                    fontFamily: "'Georgia', serif",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {m.slice(0, 3)}{isTransitionMonth ? " 🚗" : ""}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{ background: C.paper, maxWidth: "600px", margin: "0 auto", minHeight: "calc(100vh - 160px)" }}>
+        {isLocked ? (
+          <div style={{ textAlign: "center", padding: "60px 20px", color: C.inkFade }}>
+            <div style={{ fontSize: "36px", marginBottom: "12px" }}>🔒</div>
+            <div style={{ fontSize: "14px", fontStyle: "italic" }}>Tracking begins July 2026</div>
+          </div>
+        ) : (
+          <>
+            {isNewCarMonth && (
+              <div style={{
+                background: "#f0e6d0", padding: "8px 20px", fontSize: "11px",
+                color: C.inkLight, fontStyle: "italic", textAlign: "center",
+                borderBottom: `1px solid ${C.creamDark}`,
+              }}>
+                🚗 New vehicle costs active — {fmt(NEW_CAR.car)} car payment, {fmt(NEW_CAR.insurance)} insurance
+              </div>
+            )}
+
+            {/* Summary strip */}
+            <div style={{
+              background: C.green,
+              padding: "14px 20px",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr 1fr",
+              gap: "8px",
+              borderBottom: `2px solid ${C.gold}`,
+            }}>
+              {[
+                { label: "Income", value: fmt(totalIncome), color: C.greenPale },
+                { label: "Spent", value: fmt(totalExpenses), color: "#f0c8a0" },
+                { label: "Invested", value: fmt(invested), color: C.gold },
+                { label: "Left", value: fmt(remaining), color: remaining >= 0 ? C.greenPale : "#e08080" },
+              ].map((s, i) => (
+                <div key={i} style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: "8px", letterSpacing: "1.5px", color: "#7a9a7a", textTransform: "uppercase", marginBottom: "3px" }}>{s.label}</div>
+                  <div style={{ fontSize: "13px", color: s.color, fontWeight: "normal" }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Tabs */}
+            <div style={{ display: "flex", background: "#e8e3d5", borderBottom: `2px solid ${C.creamDark}` }}>
+              {["overview", "fixed", "variable", "invest", "split"].map(tab => (
+                <button key={tab} onClick={() => setActiveTab(tab)} style={tabStyle(tab)}>
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ padding: "20px 20px" }}>
+
+              {/* OVERVIEW TAB */}
+              {activeTab === "overview" && (
+                <div>
+                  <div style={{ marginBottom: "20px" }}>
+                    <div style={{ fontSize: "9px", letterSpacing: "3px", color: C.inkFade, textTransform: "uppercase", marginBottom: "12px", borderBottom: `1px solid ${C.creamDark}`, paddingBottom: "6px" }}>
+                      Income Breakdown
+                    </div>
+                    {[
+                      { label: "Base Paycheques", value: fmt(INCOME_BASE) },
+                      { label: "Mileage Payout", value: mileage > 0 ? fmt(mileage) : "—" },
+                      { label: "Expense Reimbursement", value: expensesPayout > 0 ? fmt(expensesPayout) : "—" },
+                      { label: "Total Income", value: fmt(totalIncome), bold: true },
+                    ].map((row, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+                        <span style={{ fontSize: "13px", color: row.bold ? C.ink : C.inkLight, fontStyle: row.bold ? "normal" : "italic" }}>{row.label}</span>
+                        <span style={{ fontSize: "13px", color: row.bold ? C.greenLight : C.inkFade, fontWeight: row.bold ? "bold" : "normal" }}>{row.value}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ marginBottom: "20px" }}>
+                    <div style={{ fontSize: "9px", letterSpacing: "3px", color: C.inkFade, textTransform: "uppercase", marginBottom: "12px", borderBottom: `1px solid ${C.creamDark}`, paddingBottom: "6px" }}>
+                      Where It Went
+                    </div>
+                    {[
+                      { label: "Fixed Bills", amount: fixedTotal, pct: totalIncome > 0 ? Math.round((fixedTotal / totalIncome) * 100) : 0, color: C.greenLight },
+                      { label: "Variable Spending", amount: variableTotal, pct: totalIncome > 0 ? Math.round((variableTotal / totalIncome) * 100) : 0, color: C.gold },
+                      { label: "Invested", amount: invested, pct: totalIncome > 0 ? Math.round((invested / totalIncome) * 100) : 0, color: C.greenMid },
+                      { label: "Remaining", amount: remaining, pct: totalIncome > 0 ? Math.round((Math.abs(remaining) / totalIncome) * 100) : 0, color: remaining >= 0 ? C.inkFade : C.red },
+                    ].map((row, i) => (
+                      <div key={i} style={{ marginBottom: "12px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                          <span style={{ fontSize: "12px", color: C.inkLight, fontStyle: "italic" }}>{row.label}</span>
+                          <span style={{ fontSize: "12px", color: row.color }}>{fmt(row.amount)} <span style={{ color: C.inkFade, fontSize: "10px" }}>({row.pct}%)</span></span>
+                        </div>
+                        <div style={{ height: "4px", background: C.creamDark, borderRadius: "2px", overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, row.pct))}%`, background: row.color, borderRadius: "2px", transition: "width 0.5s" }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: "9px", letterSpacing: "3px", color: C.inkFade, textTransform: "uppercase", marginBottom: "8px", borderBottom: `1px solid ${C.creamDark}`, paddingBottom: "6px" }}>
+                      Month Notes
+                    </div>
+                    <textarea
+                      value={data.notes || ""}
+                      onChange={e => updateMonthData({ notes: e.target.value })}
+                      placeholder="Anything worth noting this month..."
+                      style={{
+                        width: "100%", background: "#faf7f0",
+                        border: `1px solid ${C.creamDark}`, borderRadius: "4px",
+                        padding: "10px 12px", color: C.ink, fontSize: "13px",
+                        outline: "none", resize: "vertical", minHeight: "80px",
+                        boxSizing: "border-box", fontFamily: "'Georgia', serif",
+                        lineHeight: "1.7", fontStyle: "italic",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* FIXED TAB */}
+              {activeTab === "fixed" && (
+                <div>
+                  <div style={{ fontSize: "9px", letterSpacing: "3px", color: C.inkFade, textTransform: "uppercase", marginBottom: "14px", borderBottom: `1px solid ${C.creamDark}`, paddingBottom: "6px" }}>
+                    Fixed Monthly Bills — {fmt(fixedTotal)}/mo
+                  </div>
+
+                  {fixedExpenses.map((exp) => (
+                    <div key={exp.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 0", borderBottom: `1px dashed ${C.creamDark}` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div style={{ width: "6px", height: "6px", borderRadius: "50%", background: C.greenLight, flexShrink: 0 }} />
+                        <span style={{ fontSize: "13px", color: C.inkLight, fontStyle: "italic" }}>{exp.label}</span>
+                      </div>
+                      {editingFixed ? (
+                        <input
+                          type="number"
+                          value={exp.amount}
+                          onChange={e => setFixedExpenses(prev => prev.map(f => f.id === exp.id ? { ...f, amount: parseFloat(e.target.value) || 0 } : f))}
+                          style={{ ...inputStyle, width: "90px", textAlign: "right", color: C.greenLight }}
+                        />
+                      ) : (
+                        <span style={{ fontSize: "13px", color: C.greenLight }}>{fmt(exp.amount)}</span>
+                      )}
+                    </div>
+                  ))}
+
+                  {editingFixed && (
+                    <div style={{ marginTop: "16px", padding: "14px", background: "#faf7f0", border: `1px dashed ${C.creamDark}`, borderRadius: "4px" }}>
+                      <div style={{ fontSize: "9px", color: C.inkFade, letterSpacing: "2px", marginBottom: "10px" }}>ADD NEW FIXED EXPENSE</div>
+                      <div style={{ display: "flex", gap: "10px", alignItems: "flex-end" }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: "10px", color: C.inkFade, marginBottom: "4px" }}>Label</div>
+                          <input type="text" value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="e.g. Netflix" style={inputStyle} />
+                        </div>
+                        <div style={{ width: "90px" }}>
+                          <div style={{ fontSize: "10px", color: C.inkFade, marginBottom: "4px" }}>Amount</div>
+                          <input type="number" value={newAmount} onChange={e => setNewAmount(e.target.value)} placeholder="0.00" style={{ ...inputStyle, textAlign: "right" }} />
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (newLabel && newAmount) {
+                              setFixedExpenses(prev => [...prev, { id: Date.now().toString(), label: newLabel, amount: parseFloat(newAmount), category: "lifestyle" }]);
+                              setNewLabel(""); setNewAmount("");
+                            }
+                          }}
+                          style={{
+                            padding: "6px 14px", background: C.green, border: "none",
+                            color: C.cream, fontSize: "11px", cursor: "pointer",
+                            fontFamily: "'Georgia', serif", borderRadius: "3px",
+                          }}
+                        >
+                          Add
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => setEditingFixed(!editingFixed)}
+                    style={{
+                      marginTop: "16px", width: "100%", padding: "10px",
+                      background: editingFixed ? C.green : "#faf7f0",
+                      border: `1px solid ${editingFixed ? C.greenLight : C.creamDark}`,
+                      borderRadius: "4px",
+                      color: editingFixed ? C.cream : C.inkFade,
+                      fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase",
+                      cursor: "pointer", fontFamily: "'Georgia', serif",
+                    }}
+                  >
+                    {editingFixed ? "✓ Done Editing" : "Edit Fixed Bills"}
+                  </button>
+
+                  <div style={{ marginTop: "12px", fontSize: "10px", color: C.inkFade, fontStyle: "italic", textAlign: "center" }}>
+                    Car payment & insurance auto-switch to new vehicle rates from September onward.
+                  </div>
+                </div>
+              )}
+
+              {/* VARIABLE TAB */}
+              {activeTab === "variable" && (
+                <div>
+                  <div style={{ marginBottom: "20px", padding: "14px", background: "#f0f5f0", border: `1px dashed ${C.greenPale}`, borderRadius: "4px" }}>
+                    <div style={{ fontSize: "9px", letterSpacing: "3px", color: C.greenLight, textTransform: "uppercase", marginBottom: "12px" }}>
+                      Extra Income This Month
+                    </div>
+                    {[
+                      { key: "mileage", label: "Mileage Payout" },
+                      { key: "expenses_payout", label: "Expense Reimbursement" },
+                    ].map(item => (
+                      <div key={item.key} style={{ marginBottom: "12px" }}>
+                        <div style={{ fontSize: "10px", color: C.inkFade, fontStyle: "italic", marginBottom: "4px" }}>{item.label}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <span style={{ color: C.inkFade, fontSize: "12px" }}>$</span>
+                          <input
+                            type="number"
+                            value={data[item.key] || ""}
+                            onChange={e => updateMonthData({ [item.key]: e.target.value })}
+                            placeholder="0.00"
+                            style={{ ...inputStyle, color: C.greenLight }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ fontSize: "9px", letterSpacing: "3px", color: C.inkFade, textTransform: "uppercase", marginBottom: "14px", borderBottom: `1px solid ${C.creamDark}`, paddingBottom: "6px" }}>
+                    Variable Expenses — {fmt(variableTotal)} total
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 24px", gap: "10px", marginBottom: "8px", padding: "0 0 6px", borderBottom: `1px solid ${C.creamDark}` }}>
+                    <span style={{ fontSize: "9px", color: C.inkFade, letterSpacing: "2px", textTransform: "uppercase" }}>What was it?</span>
+                    <span style={{ fontSize: "9px", color: C.inkFade, letterSpacing: "2px", textTransform: "uppercase", textAlign: "right" }}>Amount</span>
+                    <span />
+                  </div>
+
+                  {data.rows.map((row) => (
+                    <div key={row.id} style={{ display: "grid", gridTemplateColumns: "1fr 110px 24px", gap: "10px", marginBottom: "12px", alignItems: "end" }}>
+                      <div>
+                        <input
+                          type="text"
+                          value={row.label}
+                          onChange={e => updateRow(row.id, "label", e.target.value)}
+                          placeholder="e.g. Groceries"
+                          style={inputStyle}
+                        />
+                      </div>
+                      <div>
+                        <input
+                          type="number"
+                          value={row.amount}
+                          onChange={e => updateRow(row.id, "amount", e.target.value)}
+                          placeholder="0.00"
+                          style={{ ...inputStyle, textAlign: "right", color: row.amount ? C.greenLight : C.ink }}
+                        />
+                      </div>
+                      <button
+                        onClick={() => removeRow(row.id)}
+                        style={{
+                          background: "none", border: "none", color: C.creamDark,
+                          cursor: "pointer", fontSize: "14px", padding: "0",
+                          lineHeight: 1, fontFamily: "'Georgia', serif",
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+
+                  <button
+                    onClick={addRow}
+                    style={{
+                      marginTop: "8px", width: "100%", padding: "10px",
+                      background: "#faf7f0", border: `1px dashed ${C.creamDark}`,
+                      borderRadius: "4px", color: C.inkFade,
+                      fontSize: "10px", letterSpacing: "2px", textTransform: "uppercase",
+                      cursor: "pointer", fontFamily: "'Georgia', serif",
+                    }}
+                  >
+                    + Add Row
+                  </button>
+                </div>
+              )}
+
+              {/* INVEST TAB */}
+              {activeTab === "invest" && (
+                <div>
+                  <div style={{ fontSize: "9px", letterSpacing: "3px", color: C.inkFade, textTransform: "uppercase", marginBottom: "16px", borderBottom: `1px solid ${C.creamDark}`, paddingBottom: "6px" }}>
+                    Investment Decision — {MONTHS[selectedMonth]}
+                  </div>
+
+                  <div style={{
+                    padding: "16px", borderRadius: "4px", marginBottom: "20px",
+                    background: "#f0f5f0", border: `1px solid ${C.greenPale}`,
+                    textAlign: "center",
+                  }}>
+                    <div style={{ fontSize: "9px", color: C.inkFade, letterSpacing: "3px", textTransform: "uppercase", marginBottom: "6px" }}>This Month's Mode</div>
+                    <div style={{ fontSize: "20px", color: modeConfig[investmentMode].color, fontStyle: "italic" }}>
+                      {modeConfig[investmentMode].label}
+                    </div>
+                    <div style={{ fontSize: "11px", color: C.inkFade, marginTop: "6px", fontStyle: "italic" }}>
+                      {investmentMode === "aggressive" ? "Deploying $2,000+. Strong month." :
+                       investmentMode === "conservative" ? "$750–$1,999 invested. Consistent and solid." :
+                       investmentMode === "minimal" ? "Something beats nothing. Keep the habit." :
+                       "Nothing logged yet for this month."}
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: "20px" }}>
+                    <div style={{ fontSize: "10px", color: C.inkFade, fontStyle: "italic", marginBottom: "8px" }}>Amount Invested This Month</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <span style={{ fontSize: "20px", color: C.inkFade }}>$</span>
+                      <input
+                        type="number"
+                        value={data.investment || ""}
+                        onChange={e => updateMonthData({ investment: e.target.value })}
+                        placeholder="0.00"
+                        style={{
+                          flex: 1, background: "#faf7f0",
+                          border: `1px solid ${C.creamDark}`,
+                          borderRadius: "4px", padding: "12px 14px",
+                          color: C.greenLight, fontSize: "22px",
+                          outline: "none", fontFamily: "'Georgia', serif",
+                          textAlign: "right",
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#faf7f0", border: `1px solid ${C.creamDark}`, borderRadius: "4px", padding: "14px" }}>
+                    <div style={{ fontSize: "9px", color: C.inkFade, letterSpacing: "2px", textTransform: "uppercase", marginBottom: "10px" }}>Available to Invest</div>
+                    {[
+                      { label: "After fixed bills", value: totalIncome - fixedTotal },
+                      { label: "After variable spending", value: totalIncome - fixedTotal - variableTotal },
+                      { label: "After investment", value: remaining },
+                    ].map((row, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: i < 2 ? `1px dashed ${C.creamDark}` : "none" }}>
+                        <span style={{ fontSize: "12px", color: C.inkFade, fontStyle: "italic" }}>{row.label}</span>
+                        <span style={{ fontSize: "12px", color: row.value >= 0 ? C.greenLight : C.red }}>{fmt(row.value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SPLIT CALCULATOR TAB */}
+              {activeTab === "split" && (
+                <div>
+                  <div style={{ fontSize: "9px", letterSpacing: "3px", color: C.inkFade, textTransform: "uppercase", marginBottom: "6px", borderBottom: `1px solid ${C.creamDark}`, paddingBottom: "6px" }}>
+                    TFSA ETF Split Calculator
+                  </div>
+                  <p style={{ fontSize: "12px", color: C.inkFade, fontStyle: "italic", margin: "0 0 18px" }}>
+                    Enter your investment amount and see exactly how to split it across your three ETFs.
+                  </p>
+
+                  <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
+                    {SPLIT.map(s => (
+                      <div key={s.label} style={{
+                        flex: s.pct * 10,
+                        background: s.color,
+                        height: "26px",
+                        borderRadius: "3px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}>
+                        <span style={{ fontSize: "10px", color: C.cream, fontWeight: "bold" }}>{Math.round(s.pct * 100)}%</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ marginBottom: "20px" }}>
+                    <div style={{ fontSize: "10px", color: C.inkFade, fontStyle: "italic", marginBottom: "8px" }}>Amount To Invest</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <span style={{ fontSize: "20px", color: C.inkFade }}>$</span>
+                      <input
+                        type="number"
+                        value={calcAmount}
+                        onChange={e => setCalcAmount(e.target.value)}
+                        placeholder="1614.26"
+                        style={{
+                          flex: 1, background: "#faf7f0",
+                          border: `1px solid ${C.creamDark}`,
+                          borderRadius: "4px", padding: "12px 14px",
+                          color: C.greenLight, fontSize: "22px",
+                          outline: "none", fontFamily: "'Georgia', serif",
+                          textAlign: "right",
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ background: "#faf7f0", border: `1px solid ${C.creamDark}`, borderRadius: "4px", padding: "14px" }}>
+                    <div style={{ fontSize: "9px", color: C.inkFade, letterSpacing: "2px", textTransform: "uppercase", marginBottom: "12px" }}>Your Split</div>
+                    {SPLIT.map((s, i) => (
+                      <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: i < SPLIT.length - 1 ? `1px dashed ${C.creamDark}` : "none" }}>
+                        <div>
+                          <div style={{ fontSize: "13px", color: C.inkLight, fontWeight: "bold" }}>{s.label} <span style={{ color: C.inkFade, fontWeight: "normal", fontSize: "10px" }}>({Math.round(s.pct * 100)}%)</span></div>
+                          <div style={{ fontSize: "10px", color: C.inkFade, fontStyle: "italic" }}>{s.desc}</div>
+                        </div>
+                        <span style={{ fontSize: "16px", color: s.color }}>{fmt(calcAmt * s.pct)}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ marginTop: "16px", display: "flex", gap: "8px" }}>
+                    {[750, 1500, 1614.26].map(preset => (
+                      <button
+                        key={preset}
+                        onClick={() => setCalcAmount(String(preset))}
+                        style={{
+                          flex: 1, padding: "8px", background: "#faf7f0",
+                          border: `1px solid ${C.creamDark}`, borderRadius: "4px",
+                          color: C.inkFade, fontSize: "11px", cursor: "pointer",
+                          fontFamily: "'Georgia', serif",
+                        }}
+                      >
+                        ${preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<RusticTracker />);
+</script>
+</body>
+</html>
