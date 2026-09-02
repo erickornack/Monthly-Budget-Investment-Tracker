@@ -14,6 +14,10 @@
 <body>
 <div id="root"></div>
 <script>
+const {
+  useState,
+  useEffect
+} = React;
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 // car figures are monthly totals (biweekly payment × 2) — this tracker sums
@@ -1224,6 +1228,8 @@ function RusticTracker() {
     }
   }, "$", preset))))))));
 }
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(/*#__PURE__*/React.createElement(RusticTracker, null));
 </script>
 </body>
 </html>
